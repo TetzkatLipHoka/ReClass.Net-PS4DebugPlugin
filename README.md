@@ -7,6 +7,6 @@ If you want to compile the ReClass.NET Plugins just fork the repository and crea
 ```
 ..\ReClass.NET\
 ..\ReClass.NET\ReClass.NET\ReClass.NET.csproj
-..\ReClass.NET-SamplePlugin
-..\ReClass.NET-SamplePlugin\ReClass.NET SamplePlugin.sln
+..\ReClass.NET-PS4DebugPlugin
+..\ReClass.NET-PS4DebugPlugin\PS4DebugPlugin.sln
 ```
