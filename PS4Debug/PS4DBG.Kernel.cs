@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 
 namespace libdebug
 {
@@ -55,5 +56,23 @@ namespace libdebug
             SendData(data, data.Length);
             CheckStatus();
         }
+
+        public void KernelWriteMemory<T>(ulong address, T value)
+        {
+            if (typeof(T) == typeof(string))
+            {
+                KernelWriteMemory(address, Encoding.ASCII.GetBytes((string)(object)value + (char)0x0));
+                return;
+            }
+
+            if (typeof(T) == typeof(byte[]))
+            {
+                KernelWriteMemory(address, (byte[])(object)value);
+                return;
+            }
+
+            KernelWriteMemory(address, GetBytesFromObject(value));
+        }
     }
+}
 }
