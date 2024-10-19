@@ -638,11 +638,11 @@ namespace PS4DebugPlugin
                     {
                         return false;
 //                        throw new NotImplementedException();
-//                        ps4.KernelWriteMemory(uaddress, size);
+//                        ps4.KernelWriteMemory(uaddress, buffer);
                     }
                     else
                     {
-                        ps4.WriteMemory(process.ToInt32(), uaddress, size);
+                        ps4.WriteMemory(process.ToInt32(), uaddress, buffer);
                     }                    
                 }
                 catch (Exception ex)
