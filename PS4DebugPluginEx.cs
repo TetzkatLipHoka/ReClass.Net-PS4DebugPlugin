@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using System.Reflection;
 using System.Text;
+using System.Threading;
 using ReClassNET.Core;
 using ReClassNET.Debugger;
 using ReClassNET.Forms;
@@ -16,6 +17,7 @@ using ReClassNET.UI;
 using ReClassNET.Util;
 
 using libdebug;
+using static libdebug.PS4DBG;
 
 // The namespace name must equal the plugin name
 namespace PS4DebugPlugin
@@ -94,10 +96,12 @@ namespace PS4DebugPlugin
         private int DefaultPlugin;
         private Boolean DisableSectionsAndModules;
         private Boolean ShowKernelBaseAddress;
+        private static AutoResetEvent areDebugEvent = new AutoResetEvent(false);
+        private static uint ExceptionCode;
+        private static regs Registers;
+        private static dbregs DebugRegisters;
 
         private ulong KernelBase { get; set; }
-        private ulong ProcessBase { get; set; }
-        private int ProcessId { get; set; }
 
 		/// <summary>The icon to display in the plugin manager form.</summary>
         public override Image Icon => Properties.Resources.icon;
@@ -271,33 +275,21 @@ namespace PS4DebugPlugin
 
                 var tmp = ini.Read(iniDefaultPlugin, iniSection);
                 if (tmp == "")
-                {
                     DefaultPlugin = DEFAULT_DefaultPlugin;
-                }
                 else
-                {
                     DefaultPlugin = Int32.Parse(tmp);
-                }
 
                 tmp = ini.Read(iniDisableSectionsAndModules, iniSection);
                 if (tmp == "")
-                {
                     DisableSectionsAndModules = DEFAULT_DisableSectionsAndModules;
-                }
                 else
-                {
                     DisableSectionsAndModules = (tmp == "True");
-                }
 
                 tmp = ini.Read(iniShowKernelBaseAddress, iniSection);
                 if (tmp == "")
-                {
                     ShowKernelBaseAddress = DEFAULT_DisableSectionsAndModules;
-                }
                 else
-                {
                     ShowKernelBaseAddress = (tmp == "True");
-                }
             }
             catch // (Exception ex)
             {
@@ -309,8 +301,6 @@ namespace PS4DebugPlugin
             }
 
             KernelBase = 0;
-            ProcessId = -1;
-            ProcessBase = 0;
             ps4 = null;
 
             host.Process.CoreFunctions.RegisterFunctions("PS4DBG Loader", this);
@@ -440,8 +430,6 @@ namespace PS4DebugPlugin
             lock (sync)
             {
                 KernelBase = 0;
-                ProcessId = -1;
-                ProcessBase = 0;
 
                 if (ps4 != null)
                 {
@@ -482,35 +470,23 @@ namespace PS4DebugPlugin
         {
             SectionProtection sectionProtection = new SectionProtection();
 
-            if ((prot & (uint)PS4DBG.VM_PROTECTIONS.VM_PROT_READ) == (uint)PS4DBG.VM_PROTECTIONS.VM_PROT_READ)
-            {
+            if ((prot & (uint)VM_PROTECTIONS.VM_PROT_READ) == (uint)VM_PROTECTIONS.VM_PROT_READ)
                 sectionProtection |= SectionProtection.Read;
-            }
 
-            if ((prot & (uint)PS4DBG.VM_PROTECTIONS.VM_PROT_WRITE) == (uint)PS4DBG.VM_PROTECTIONS.VM_PROT_WRITE)
-            {
+            if ((prot & (uint)VM_PROTECTIONS.VM_PROT_WRITE) == (uint)VM_PROTECTIONS.VM_PROT_WRITE)
                 sectionProtection |= SectionProtection.Read | SectionProtection.Write;
-            }
 
-            if ((prot & (uint)PS4DBG.VM_PROTECTIONS.VM_PROT_DEFAULT) == (uint)PS4DBG.VM_PROTECTIONS.VM_PROT_DEFAULT)
-            {
+            if ((prot & (uint)VM_PROTECTIONS.VM_PROT_DEFAULT) == (uint)VM_PROTECTIONS.VM_PROT_DEFAULT)
                 sectionProtection |= SectionProtection.Read | SectionProtection.Write;
-            }
 
-            if ((prot & (uint)PS4DBG.VM_PROTECTIONS.VM_PROT_EXECUTE) == (uint)PS4DBG.VM_PROTECTIONS.VM_PROT_EXECUTE)
-            {
+            if ((prot & (uint)VM_PROTECTIONS.VM_PROT_EXECUTE) == (uint)VM_PROTECTIONS.VM_PROT_EXECUTE)
                 sectionProtection |= SectionProtection.Execute;
-            }
 
-            if ((prot & (uint)PS4DBG.VM_PROTECTIONS.VM_PROT_READEXEC) == (uint)PS4DBG.VM_PROTECTIONS.VM_PROT_READEXEC)
-            {
+            if ((prot & (uint)VM_PROTECTIONS.VM_PROT_READEXEC) == (uint)VM_PROTECTIONS.VM_PROT_READEXEC)
                 sectionProtection |= SectionProtection.Read | SectionProtection.Execute;
-            }
 
-            if ((prot & (uint)PS4DBG.VM_PROTECTIONS.VM_PROT_ALL) == (uint)PS4DBG.VM_PROTECTIONS.VM_PROT_ALL)
-            {
+            if ((prot & (uint)VM_PROTECTIONS.VM_PROT_ALL) == (uint)VM_PROTECTIONS.VM_PROT_ALL)
                 sectionProtection |= SectionProtection.Execute | SectionProtection.Read | SectionProtection.Write;
-            }
 
             return sectionProtection;
         }
@@ -569,20 +545,9 @@ namespace PS4DebugPlugin
             {
                 try
                 {
-                    ProcessId = pid.ToInt32();
-
-                    var ProcessMap = ps4.GetProcessMaps(ProcessId);
-//                    var memoryEntry = ProcessMaps.FindEntry("executable");
-                    MemoryEntry memoryEntry = null;
-                    if (ProcessMap.entries.Length > 0)
-                    {
-                        memoryEntry = ProcessMap.entries[0];
-                    } else {
-                        ProcessId = -1;
+                    var ProcessMap = ps4.GetProcessMaps(pid.ToInt32());
+                    if (ProcessMap.entries.Length == 0)
                         return IntPtr.Zero;
-                    }
-
-                    ProcessBase = memoryEntry.start;
                 }
                 catch (Exception ex)
                 {
@@ -598,7 +563,7 @@ namespace PS4DebugPlugin
 
             lock (sync)
             {
-                return (process.ToInt32() != -1 && ProcessId != -1 && (ps4 != null) && ps4.IsConnected);
+                return (process.ToInt32() != -1 && (ps4 != null) && ps4.IsConnected);
             }
         }
 
@@ -615,12 +580,10 @@ namespace PS4DebugPlugin
 
             lock (sync)
             {
-                if (uaddress >= KernelBase) {
+                if (uaddress >= KernelBase)
                     buffer = ps4.KernelReadMemory(uaddress, size);
-                } else
-                {
+                else
                     buffer = ps4.ReadMemory(process.ToInt32(), uaddress, size);
-                }
                 return buffer.Length != 0;
             }
         }
@@ -641,9 +604,7 @@ namespace PS4DebugPlugin
 //                        ps4.KernelWriteMemory(uaddress, buffer);
                     }
                     else
-                    {
-                        ps4.WriteMemory(process.ToInt32(), uaddress, buffer);
-                    }                    
+                        ps4.WriteMemory(process.ToInt32(), uaddress, buffer);                 
                 }
                 catch (Exception ex)
                 {
@@ -678,12 +639,15 @@ namespace PS4DebugPlugin
 
         public bool AttachDebuggerToProcess(IntPtr id)
         {
-            return false;
-
             if (ps4 == null) { return false; }
             if (ps4.IsDebugging) { return false; }
 
-            ps4.AttachDebugger(id.ToInt32(), DebuggerInterruptCallback);
+            lock (sync)
+            {
+                ps4.AttachDebugger(id.ToInt32(), new DebuggerInterruptCallback(this.DebuggerInterruptCallback));
+                ps4.ProcessResume();
+            }
+
             return true;
         }
 
@@ -691,28 +655,144 @@ namespace PS4DebugPlugin
         {
             if (ps4 == null) { return; }
 //            if (ps4.IsDebugging) { return; }
-            ps4.DetachDebugger();
-        }
 
-        public bool AwaitDebugEvent(ref DebugEvent evt, int timeoutInMilliseconds)
-        {
-            return false;
+            lock (sync)
+            {
+                ps4.DetachDebugger();
+            }
         }
 
         private void DebuggerInterruptCallback(uint lwpid, uint status, string tdname, regs regs, fpregs fpregs, dbregs dbregs)
         {
-            if (ps4 == null) { return; }
-            ps4.ProcessResume();
+            ExceptionCode = status;
+            Registers = regs;
+            DebugRegisters = dbregs;
+
+            areDebugEvent.Set();
+        }
+
+        public bool AwaitDebugEvent(ref DebugEvent evt, int timeoutInMilliseconds)
+        {
+            bool isSignaled = areDebugEvent.WaitOne(timeoutInMilliseconds);
+            if (isSignaled)
+            {
+                if ((DebugRegisters.dr6 & 1) == 1)
+                    evt.ExceptionInfo.CausedBy = HardwareBreakpointRegister.Dr0;
+                else if ((DebugRegisters.dr6 & 2) == 2)
+                    evt.ExceptionInfo.CausedBy = HardwareBreakpointRegister.Dr1;
+                else if ((DebugRegisters.dr6 & 4) == 4)
+                    evt.ExceptionInfo.CausedBy = HardwareBreakpointRegister.Dr2;
+                else if ((DebugRegisters.dr6 & 8) == 8)
+                    evt.ExceptionInfo.CausedBy = HardwareBreakpointRegister.Dr3;
+                else
+                    evt.ExceptionInfo.CausedBy = HardwareBreakpointRegister.InvalidRegister;
+
+                evt.ExceptionInfo.ExceptionCode = (IntPtr)ExceptionCode;
+//                evt.ExceptionInfo.ExceptionFlags = (IntPtr)0x0000000000000000;
+                evt.ExceptionInfo.ExceptionAddress = (IntPtr)Registers.r_rip;
+
+                evt.ExceptionInfo.Registers.Rax = (IntPtr)Registers.r_rax;
+                evt.ExceptionInfo.Registers.Rbx = (IntPtr)Registers.r_rbx;
+                evt.ExceptionInfo.Registers.Rcx = (IntPtr)Registers.r_rcx;
+                evt.ExceptionInfo.Registers.Rdx = (IntPtr)Registers.r_rdx;
+                evt.ExceptionInfo.Registers.Rdi = (IntPtr)Registers.r_rdi;
+                evt.ExceptionInfo.Registers.Rsi = (IntPtr)Registers.r_rsi;
+                evt.ExceptionInfo.Registers.Rsp = (IntPtr)Registers.r_rsp;
+                evt.ExceptionInfo.Registers.Rbp = (IntPtr)Registers.r_rbp;
+                evt.ExceptionInfo.Registers.Rip = (IntPtr)Registers.r_rip;
+                evt.ExceptionInfo.Registers.R8 = (IntPtr)Registers.r_r8;
+                evt.ExceptionInfo.Registers.R9 = (IntPtr)Registers.r_r9;
+                evt.ExceptionInfo.Registers.R10 = (IntPtr)Registers.r_r10;
+                evt.ExceptionInfo.Registers.R11 = (IntPtr)Registers.r_r11;
+                evt.ExceptionInfo.Registers.R12 = (IntPtr)Registers.r_r12;
+                evt.ExceptionInfo.Registers.R13 = (IntPtr)Registers.r_r13;
+                evt.ExceptionInfo.Registers.R14 = (IntPtr)Registers.r_r14;
+                evt.ExceptionInfo.Registers.R15 = (IntPtr)Registers.r_r15;
+            }
+
+            return isSignaled;
         }
 
         public void HandleDebugEvent(ref DebugEvent evt)
         {
+            if (ps4 == null) { return; }
+            if (!ps4.IsDebugging) { return; }
 
+            lock (sync)
+            {
+                ps4.ProcessResume();
+            }
         }
 
         public bool SetHardwareBreakpoint(IntPtr id, IntPtr address, HardwareBreakpointRegister register, HardwareBreakpointTrigger trigger, HardwareBreakpointSize size, bool set)
         {
-            return false;
+            if (ps4 == null) { return false; }
+            if (!ps4.IsDebugging) { return false; }
+
+            int index = 0;
+            switch (register)
+            {
+                case HardwareBreakpointRegister.InvalidRegister:
+                    return false;
+                case HardwareBreakpointRegister.Dr0:
+                    index = 0;
+                    break;
+
+                case HardwareBreakpointRegister.Dr1:
+                    index = 1;
+                    break;
+
+                case HardwareBreakpointRegister.Dr2:
+                    index = 2;
+                    break;
+
+                case HardwareBreakpointRegister.Dr3:
+                    index = 3;
+                    break;
+            }
+
+            WATCHPT_LENGTH len = WATCHPT_LENGTH.DBREG_DR7_LEN_1;
+            switch (size)
+            {
+                case HardwareBreakpointSize.Size1:
+                    len = WATCHPT_LENGTH.DBREG_DR7_LEN_1;
+                    break;
+
+                case HardwareBreakpointSize.Size2:
+                    len = WATCHPT_LENGTH.DBREG_DR7_LEN_2;
+                    break;
+
+                case HardwareBreakpointSize.Size4:
+                    len = WATCHPT_LENGTH.DBREG_DR7_LEN_4;
+                    break;
+
+                case HardwareBreakpointSize.Size8:
+                    len = WATCHPT_LENGTH.DBREG_DR7_LEN_8;
+                    break;
+            }
+
+            WATCHPT_BREAKTYPE type = WATCHPT_BREAKTYPE.DBREG_DR7_EXEC;
+            switch (trigger)
+            {
+                case HardwareBreakpointTrigger.Execute:
+                    type = WATCHPT_BREAKTYPE.DBREG_DR7_EXEC;
+                    break;
+
+                case HardwareBreakpointTrigger.Access:
+                    type = WATCHPT_BREAKTYPE.DBREG_DR7_RDWR;
+                    break;
+
+                case HardwareBreakpointTrigger.Write:
+                    type = WATCHPT_BREAKTYPE.DBREG_DR7_WRONLY;
+                    break;
+            }
+
+            lock (sync)
+            {
+                ps4.ChangeWatchpoint(index, set, len, type, (ulong)address.ToInt64());
+            }
+
+            return true;
         }
     }
 }

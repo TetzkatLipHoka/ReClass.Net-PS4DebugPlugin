@@ -23,7 +23,7 @@ namespace libdebug
         private const string LIBRARY_VERSION = "1.2";
         private const int PS4DBG_PORT = 744;
         private const int PS4DBG_DEBUG_PORT = 755;
-        private const int NET_MAX_LENGTH = 8192;
+        private const int NET_MAX_LENGTH = 0x20000; // 8192;
 
         private const int BROADCAST_PORT = 1010;
         private const uint BROADCAST_MAGIC = 0xFFFFAAAA;

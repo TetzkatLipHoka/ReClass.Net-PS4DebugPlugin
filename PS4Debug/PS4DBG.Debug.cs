@@ -75,7 +75,6 @@ namespace libdebug
         {
             DebuggerInterruptCallback callback = (DebuggerInterruptCallback)obj;
 
-//            IPAddress ip = IPAddress.Parse("0.0.0.0");
             IPAddress ip = IPAddress.Parse(GetLocalIPAddress());
             IPEndPoint endpoint = new IPEndPoint(ip, PS4DBG_DEBUG_PORT);
 
