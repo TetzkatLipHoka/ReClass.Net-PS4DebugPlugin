@@ -794,10 +794,15 @@ namespace PS4DebugPlugin
 
             return true;
         }
+        
+    public int ConnectServer(string ip, short port)
+    {
+         return -1;
+    }
 
-        public bool OpenDumpFile(IntPtr dumpFilePath)
-        {
-            return false;
-        }
+    public bool OpenDumpFile(IntPtr dumpFilePath)
+    {
+         return false;
+    }        
     }
 }
