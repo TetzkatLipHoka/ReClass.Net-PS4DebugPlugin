@@ -794,5 +794,10 @@ namespace PS4DebugPlugin
 
             return true;
         }
+
+        public bool OpenDumpFile(IntPtr dumpFilePath)
+        {
+            return false;
+        }
     }
 }
