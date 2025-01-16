@@ -81,21 +81,19 @@ namespace PS4DebugPlugin
     {
         private const string SettingsFile = "PS4.ini";
         private const string DEFAULT_IP = "192.168.2.1";
-        private const int DEFAULT_DefaultPlugin = 0;
         private const Boolean DEFAULT_DisableSectionsAndModules = true;
         private const Boolean DEFAULT_ShowKernelBaseAddress = false;
         private const string iniSection = "PS4";
         private const string iniIP = "IP";
-        private const string iniDefaultPlugin = "DefaultPlugin";
         private const string iniDisableSectionsAndModules = "DisableSectionsAndModules";
         private const string iniShowKernelBaseAddress = "ShowKernelBaseAddress";
 
         private readonly object sync = new object();
         private IPluginHost host;
         private string IP;
-        private int DefaultPlugin;
         private Boolean DisableSectionsAndModules;
         private Boolean ShowKernelBaseAddress;
+        private Boolean KernelMode;
         private static AutoResetEvent areDebugEvent = new AutoResetEvent(false);
         private static uint ExceptionCode;
         private static regs Registers;
@@ -114,10 +112,14 @@ namespace PS4DebugPlugin
             IP = textBox.Text;
         }
 
-        private void cbDefaultPluginSelectedIndexChanged(object sender, EventArgs e)
+        private void tsbMemoryModeModeClick(object sender, EventArgs e)
         {
-            ComboBox comboBox = (ComboBox)sender;
-            DefaultPlugin = comboBox.SelectedIndex;
+            ToolStripButton tsbMemoryModeMode = (ToolStripButton)sender;
+            if (tsbMemoryModeMode.Checked)
+                tsbMemoryModeMode.Text = "Kernel Mode";
+            else
+                tsbMemoryModeMode.Text = "Default Mode";
+            KernelMode = tsbMemoryModeMode.Checked;
         }
 
         private void chkDisableSectionsAndModulesCheckedChanged(object sender, EventArgs e)
@@ -171,35 +173,11 @@ namespace PS4DebugPlugin
                                 {
                                     Name = "tbIP",
                                     Text = IP,
-                                    Location = new System.Drawing.Point(98, 3),
+                                    Location = new System.Drawing.Point(28, 3),
                                     Size = new System.Drawing.Size(120, 20)
                                 };
                                 tbIP.KeyUp += tbIP_KeyUp;
                                 newTab.Controls.Add(tbIP);
-
-                                // DefaultPlugin
-                                var lblDefaultPlugin = new Label()
-                                {
-                                    Name = "lblDefaultPlugin",
-                                    Text = "Default Plugin:",
-                                    AutoSize = true,
-                                    Location = new System.Drawing.Point(6, 30),
-                                    Size = new System.Drawing.Size(28, 13),
-                                };
-                                newTab.Controls.Add(lblDefaultPlugin);
-
-                                var cbDefaultPlugin = new ComboBox()
-                                {
-                                    Name = "cbDefaultPlugin",
-                                    Location = new System.Drawing.Point(98, 27),
-                                    Size = new System.Drawing.Size(120, 20),
-                                };
-                                cbDefaultPlugin.Items.Add("None");
-                                cbDefaultPlugin.Items.Add("Frame4");
-                                cbDefaultPlugin.Items.Add("PS4Debug");
-                                cbDefaultPlugin.SelectedIndex = DefaultPlugin;
-                                cbDefaultPlugin.SelectedIndexChanged += cbDefaultPluginSelectedIndexChanged;
-                                newTab.Controls.Add(cbDefaultPlugin);
 
                                 // DisableSectionsAndModules
                                 var chkDisableSectionsAndModules = new CheckBox()
@@ -208,7 +186,7 @@ namespace PS4DebugPlugin
                                     Text = "Disable Sections and Modules (Reduce Bandwidth)",
                                     Checked = DisableSectionsAndModules,
                                     AutoSize = true,
-                                    Location = new System.Drawing.Point(6, 52),
+                                    Location = new System.Drawing.Point(6, 28),
                                     Size = new System.Drawing.Size(28, 13),
                                 };
                                 chkDisableSectionsAndModules.CheckedChanged += chkDisableSectionsAndModulesCheckedChanged;
@@ -221,7 +199,7 @@ namespace PS4DebugPlugin
                                     Text = "Show Kernel BaseAddress [Requires Restart]",
                                     Checked = ShowKernelBaseAddress,
                                     AutoSize = true,
-                                    Location = new System.Drawing.Point(6, 72),
+                                    Location = new System.Drawing.Point(6, 48),
                                     Size = new System.Drawing.Size(28, 13),
                                 };
                                 chkShowKernelBaseAddress.CheckedChanged += chkShowKernelBaseAddressCheckedChanged;
@@ -233,10 +211,6 @@ namespace PS4DebugPlugin
                                 var tbIP = PS4Tab.Controls.Find("tbIP", true).FirstOrDefault() as TextBox;
                                 if (tbIP != null)
                                     tbIP.KeyUp += tbIP_KeyUp;
-
-                                var cbDefaultPlugin = PS4Tab.Controls.Find("cbDefaultPlugin", true).FirstOrDefault() as ComboBox;
-                                if (cbDefaultPlugin != null)
-                                    cbDefaultPlugin.SelectedIndexChanged += cbDefaultPluginSelectedIndexChanged;
 
                                 var chkDisableSectionsAndModules = PS4Tab.Controls.Find("chkDisableSectionsAndModules", true).FirstOrDefault() as CheckBox;
                                 if (chkDisableSectionsAndModules != null)
@@ -273,13 +247,7 @@ namespace PS4DebugPlugin
                 IP = ini.Read(iniIP, iniSection);
                 if (IP == "") { IP = DEFAULT_IP; }
 
-                var tmp = ini.Read(iniDefaultPlugin, iniSection);
-                if (tmp == "")
-                    DefaultPlugin = DEFAULT_DefaultPlugin;
-                else
-                    DefaultPlugin = Int32.Parse(tmp);
-
-                tmp = ini.Read(iniDisableSectionsAndModules, iniSection);
+                var tmp = ini.Read(iniDisableSectionsAndModules, iniSection);
                 if (tmp == "")
                     DisableSectionsAndModules = DEFAULT_DisableSectionsAndModules;
                 else
@@ -294,20 +262,15 @@ namespace PS4DebugPlugin
             catch // (Exception ex)
             {
                 IP = DEFAULT_IP;
-                DefaultPlugin = DEFAULT_DefaultPlugin;
                 DisableSectionsAndModules = DEFAULT_DisableSectionsAndModules;
                 ShowKernelBaseAddress = DEFAULT_ShowKernelBaseAddress;
 //                host.Logger.Log(ex);
             }
-
+            KernelMode = false;
             KernelBase = 0;
             ps4 = null;
 
             host.Process.CoreFunctions.RegisterFunctions("PS4DBG Loader", this);
-
-            if (DefaultPlugin == 2) {
-                host.Process.CoreFunctions.SetActiveFunctionsProvider("PS4DBG Loader");
-            }
 
             if (ShowKernelBaseAddress) 
                 CreateObjects();
@@ -335,6 +298,21 @@ namespace PS4DebugPlugin
                                 Size = new System.Drawing.Size(114, 13),
                             };
                             mainMenuStrip.Items.Add(tbKernelBaseAddress);
+                        }
+
+                        var tsbMemoryModeMode = mainMenuStrip.Items.Find("tsbMemoryModeMode", true).FirstOrDefault() as ToolStripButton;
+                        if (tsbMemoryModeMode == null)
+                        {
+                            tsbMemoryModeMode = new ToolStripButton()
+                            {                               
+                                Name = "tsbMemoryModeMode",
+                                Text = "Default Mode",
+                                Size = new System.Drawing.Size(114, 13),
+                                Checked = false,
+                                CheckOnClick = true,
+                            };
+                            tsbMemoryModeMode.Click += tsbMemoryModeModeClick;
+                            mainMenuStrip.Items.Add(tsbMemoryModeMode);
                         }
 
 /*
@@ -379,7 +357,6 @@ namespace PS4DebugPlugin
             var path = Path.Combine(PathUtil.SettingsFolderPath, SettingsFile);
             var ini = new IniFile(path);
             ini.Write(iniIP, IP, iniSection);
-            ini.Write(iniDefaultPlugin, DefaultPlugin.ToString(), iniSection);
             ini.Write(iniDisableSectionsAndModules, DisableSectionsAndModules, iniSection);
             ini.Write(iniShowKernelBaseAddress, ShowKernelBaseAddress, iniSection);
 
@@ -580,7 +557,7 @@ namespace PS4DebugPlugin
 
             lock (sync)
             {
-                if (uaddress >= KernelBase)
+                if (KernelMode) // (uaddress >= KernelBase)
                     buffer = ps4.KernelReadMemory(uaddress, size);
                 else
                     buffer = ps4.ReadMemory(process.ToInt32(), uaddress, size);
@@ -597,7 +574,7 @@ namespace PS4DebugPlugin
             {
                 try
                 {
-                    if (uaddress >= KernelBase)
+                    if (KernelMode) // (uaddress >= KernelBase)
                     {
                         return false;
 //                        throw new NotImplementedException();
